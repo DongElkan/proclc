@@ -46,7 +46,7 @@ cdef int fbleft(double[::1] x, double v):
 cdef double dot(double[::1] x, double[:, ::1] m, double c, double[::1] r):
     cdef:
         Py_ssize_t n = x.shape[0]
-        Py_ssize_t p = x.shape[1]
+        Py_ssize_t p = m.shape[1]
         Py_ssize_t i, j
         double a
 
@@ -68,14 +68,14 @@ cdef void q_y(double[:, ::1] q, double[::1] y, double[::1] z):
 
     for i in range(n):
         v = 0.
-        for j in range(i, i+3):
+        for j in range(i, i + 3):
             v += q[i, j] * y[j]
         z[i] = v
 
 
 @cython.wraparound(False)
 @cython.boundscheck(False)
-cdef void hat_matrix_diagonal(double[:, ::1] q, double[:, ::1]b,
+cdef void hat_matrix_diagonal(double[:, ::1] q, double[:, ::1] b,
                               double a, double[::1] d):
     """
     Calculates diagonal elements of hat matrix
@@ -102,20 +102,14 @@ cdef void hat_matrix_diagonal(double[:, ::1] q, double[:, ::1]b,
     d[0] = q[0, 0] * q[0, 0] * b[0, 0]
     # s[i], n-1 > i > 0
     for i in range(1, n - 1):
-        i0 = i - 2
-        if i0 < 0:
-            i0 = 0
-        i1 = i + 1
-        if i1 > n - 2:
-            i1 = n - 2
-
+        i0 = max(i - 2, 0)
+        i1 = min(i + 1, n - 2)
         v = 0.
         for j in range(i0, i1):
             vi = 0.
             for k in range(i0, i1):
                 vi += q[k, i] * b[k, j]
             v += q[j, i] * vi
-
         d[i] = v
     # s[n-1]
     d[n - 1] = q[n - 3, n - 1] * q[n - 3, n - 1] * b[n - 3, n - 3]
@@ -156,7 +150,7 @@ cdef void ldl_decompose(double[:, ::1] a, double[:, ::1] ml, double[::1] d):
         ml[i, i1] = t1
 
     for i in range(n):
-        ml[i, i] = 1
+        ml[i, i] = 1.
 
 
 @cython.wraparound(False)
@@ -209,7 +203,7 @@ cdef void solve_linear(double[:, ::1] ml, double[::1] d, double[::1] z, double[:
 @cython.wraparound(False)
 @cython.boundscheck(False)
 @cython.cdivision(True)
-cdef inverse_reinsch_coef_matrix(double[:, ::1] ml, double[::1] d, double[:, ::1] b):
+cdef void inverse_reinsch_coef_matrix(double[:, ::1] ml, double[::1] d, double[:, ::1] b):
     """
     Calculates the inverse of Reinsch coefficient matrix by LDL
     decomposition.
@@ -234,11 +228,11 @@ cdef inverse_reinsch_coef_matrix(double[:, ::1] ml, double[::1] d, double[:, ::1
 
     for i in range(1, n + 1):
         j = n - i
-        d0 = d2[j]
+        j1 = j + 8
         if j1 > n:
             j1 = n
 
-        j1 = j + 8
+        d0 = d2[j]
         for k in range(j + 1, j1):
             v = 0.
             for h in range(j + 1, j1):
@@ -254,8 +248,8 @@ cdef inverse_reinsch_coef_matrix(double[:, ::1] ml, double[::1] d, double[:, ::1
 
 @cython.wraparound(False)
 @cython.boundscheck(False)
-cdef reinsch_coef_matrix(double[:, ::1] q, double[:, ::1] r,
-                         double a, double[:, ::1] c):
+cdef void reinsch_coef_matrix(double[:, ::1] q, double[:, ::1] r,
+                              double a, double[:, ::1] c):
     """
     Calculates coefficient matrix of Reinsch algorith.
 
@@ -268,25 +262,15 @@ cdef reinsch_coef_matrix(double[:, ::1] q, double[:, ::1] r,
     """
     cdef:
         Py_ssize_t n = q.shape[0]
-        Py_ssize_t i, i0, i1, j0, j1
+        Py_ssize_t i, k, j, i0, i1, j0, j1
         double v
 
     for i in range(n):
         i1 = i + 3
-        if i1 > n:
-            i1 = n
-        i0 = i - 2
-        if i0 < 0:
-            i0 = 0
-
-        for j in range(i0, i1):
-            j0 = i
-            if j0 < j:
-                j = j0
-            j1 = i1
-            if j1 > j + 3:
-                j1 = j + 3
-
+        i0 = max(0, i - 2)
+        for j in range(i0, min(i1, n)):
+            j0 = max(i, j)
+            j1 = min(i1, j + 3)
             v = 0.
             for k in range(j0, j1):
                 v += q[i, k] * q[j, k]
@@ -342,7 +326,7 @@ cdef void cubic_splines(double[::1] x, double[:, ::1] q, double[:, ::1] r):
 @cython.wraparound(False)
 @cython.boundscheck(False)
 @cython.cdivision(True)
-cdef spline_coef(double[::1] x, double[::1] z, double[::1] g):
+cdef double[:, ::1] spline_coef(double[::1] x, double[::1] z, double[::1] g):
     """
     Calculates spline coefficients.
 
@@ -382,7 +366,7 @@ cdef spline_coef(double[::1] x, double[::1] z, double[::1] g):
 
 @cython.wraparound(False)
 @cython.boundscheck(False)
-cdef predict_out_range(double[::1] x, double[:, ::1] coefs, double b0, double bn):
+cdef double[::1] predict_out_range(double[::1] x, double[:, ::1] coefs, double b0, double bn):
     """
     Predicts x out range of the bounds in fitting.
 
@@ -418,7 +402,7 @@ cdef predict_out_range(double[::1] x, double[:, ::1] coefs, double b0, double bn
 @cython.wraparound(False)
 @cython.boundscheck(False)
 @cython.cdivision(True)
-cdef predict(double[::1] x, double[::1] g, double[::1] d, double[::1] intervals):
+cdef double[::1] predict(double[::1] x, double[::1] g, double[::1] d, double[::1] intervals):
     """
     Predicts x.
 
@@ -450,7 +434,7 @@ cdef predict(double[::1] x, double[::1] g, double[::1] d, double[::1] intervals)
         if jr == 0:
             p[i] = g[0]
         elif jr == n:
-            p[i] = g[-1]
+            p[i] = g[n - 1]
         else:
             d_lo = x[i] - intervals[jl]
             d_hi = intervals[jr] - x[i]
@@ -475,7 +459,7 @@ cdef (double, double, double) calculate_criteria(double[::1] residuals, double[:
         double cv = 0.
         double mse = 0.
         double t = 0.
-        double err, cv, gcv, aicc
+        double err, gcv, aicc
 
     for i in range(n):
         err = residuals[i] / (1. - d[i])
@@ -493,6 +477,8 @@ cdef (double, double, double) calculate_criteria(double[::1] residuals, double[:
     return cv, gcv, aicc
 
 
+@cython.wraparound(False)
+@cython.boundscheck(False)
 cpdef fit_ss(double[::1] x, double[::1] y, double[::1] params):
     """ Fits smoothing splines. """
 
@@ -508,7 +494,7 @@ cpdef fit_ss(double[::1] x, double[::1] y, double[::1] params):
         double[:, ::1] b = np.zeros((n2, n2), dtype=DTYPE)
         double[:, ::1] criteria = np.zeros((3, nm), dtype=DTYPE)
         double[:, ::1] fit_values = np.zeros((nm, n), dtype=DTYPE)
-        double[:, ::1] d2 = np.zeros((nm, n), dtype=DTYPE)
+        double[:, ::1] d2 = np.zeros((nm, n2), dtype=DTYPE)
         double[::1] d = np.zeros(n2, dtype=DTYPE)
         double[::1] s = np.zeros(n2, dtype=DTYPE)
         double[::1] z = np.zeros(n, dtype=DTYPE)
@@ -551,11 +537,13 @@ cpdef fit_ss(double[::1] x, double[::1] y, double[::1] params):
 
 
 cpdef ss_coefs(double[::1] x, double[::1] z, double[::1] g):
-    cpdef:
+    cdef:
         double[:, ::1] coef = spline_coef(x, z, g)
     return np.asarray(coef)
 
 
+@cython.wraparound(False)
+@cython.boundscheck(False)
 cpdef predict_ss(double[::1] x, double[::1] f, double[::1] g,
                  double[::1] b, double[:, ::1] coef):
     """
@@ -572,7 +560,7 @@ cpdef predict_ss(double[::1] x, double[::1] f, double[::1] g,
         Predicted array.
 
     """
-    cpdef:
+    cdef:
         Py_ssize_t n = x.shape[0]
         Py_ssize_t n0 = b.shape[0]
         int[::1] ix_in = np.zeros(n, dtype=DTYPE_INT)
@@ -605,7 +593,6 @@ cpdef predict_ss(double[::1] x, double[::1] f, double[::1] g,
     if io > 0:
         yp_out = predict_out_range(x_out[:io], coef, b0, bn)
         for i in range(io):
-            for i in range(io):
-                y[ix_out[i]] = yp_out[i]
+            y[ix_out[i]] = yp_out[i]
 
     return np.asarray(y)

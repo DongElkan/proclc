@@ -25,7 +25,7 @@ import numpy as np
 
 from typing import List, Optional, Tuple, Dict
 
-from core import fit_ss, ss_coefs, predict_ss
+from .core import fit_ss, ss_coefs, predict_ss
 
 
 class SplineSmoothing:
@@ -48,7 +48,7 @@ class SplineSmoothing:
                  smooth_params: Optional[List[float]] = None,
                  criteria: str = "aicc"):
 
-        self.smooth_params = [10 ** v for v in range(8)]
+        self.smooth_params = [10 ** v for v in range(-3, 8)]
         self.criteria = criteria
 
         if smooth_params is not None:
@@ -161,19 +161,10 @@ class SplineSmoothing:
                                "run the fit in advance.")
         x = self._check_pred_x(x)
 
-        b0 = self._x[0]
-        bn = self._x[-1]
-        ix = (x >= b0) & (x <= bn)
-        yp = np.zeros_like(x)
+        y = predict_ss(x, self._best_fit, self._d2,
+                       self._x, self._coefficients)
 
-        # do prediction
-        if ix.any():
-            yp[ix] = predict(x[ix], self._best_fit, self._d2, self._x)
-
-        if not ix.all():
-            yp[~ix] = predict_out_range(x[~ix], self._coefficients, b0, bn)
-
-        return yp
+        return y
 
     def _fit(self, x, y) -> np.ndarray:
         """ Smooths the arrays. """
@@ -181,77 +172,32 @@ class SplineSmoothing:
 
         x = x.astype(np.float64)
         y = y.astype(np.float64)
+        params = np.fromiter(self.smooth_params, dtype=np.float64)
+
+        criteria, fit_values, d2, q, r = fit_ss(x, y, params)
+        print(criteria)
 
         # Q, R matrices
-        q, r = cubic_splines(x)
         self._Q = q
         self._R = r
         self._x = x
-
-        # Q * y
-        z = _q_y(q, y)
-
-        # selection of smoothing parameters
-        fits = []
-        devs = []
-        for p in self.smooth_params:
-            s = reinsch_coef_matrix(q, r, p)
-            # DLD Cholesky decomposition
-            ml, d = ldl_decompose(s)
-            # gamma by solving linear system
-            m = solve_linear(ml, d, z)
-            # diagonal elements of hat matrix
-            b = inverse_reinsch_coef_matrix(ml, d)
-            diag_hat = hat_matrix_diagonal(q, b, p)
-            # fitted curve
-            err = p * np.dot(m, q)
-            fv = y - err
-
-            self._calculate_criterion(diag_hat, err)
-            fits.append(fv)
-            devs.append(m)
+        self._score["cv"] = criteria[0]
+        self._score["gcv"] = criteria[1]
+        self._score["aicc"] = criteria[2]
 
         i = np.argmin(self._score[self.criteria])
-        best_fit = fits[i]
+        best_fit = fit_values[i]
         self._best_index = i
         self._best_fit = best_fit
 
         # coefficients
-        coef = spline_coef(x, best_fit, devs[i])
-        self._coefficients = coef
+        self._coefficients = ss_coefs(x, best_fit, d2[i])
 
-        d2 = np.zeros_like(x)
-        d2[1:-1] = devs[i]
-        self._d2 = d2
+        best_d2 = np.zeros_like(x)
+        best_d2[1:-1] = d2[i]
+        self._d2 = best_d2
 
         return best_fit
-
-    def _calculate_criterion(self, hat_diagonals, residuals):
-        """
-        Calculates criterion: GCV, AICC, CV
-
-        Args:
-            hat_diagonals: Diagonal elements of hat matrix.
-            residuals: Residuals of fitting
-
-        """
-        n = residuals.size
-
-        # CV
-        loo_err = residuals / (1 - hat_diagonals)
-        cv = (loo_err * loo_err).mean()
-
-        # GCV
-        t = hat_diagonals.sum()
-        mse = (residuals * residuals).mean()
-        gcv = mse / ((1 - t / n) ** 2)
-
-        # AICC
-        aicc = np.log(mse) + 1 + 2 * (1 + t) / (n - t - 2)
-
-        self._score["gcv"].append(gcv)
-        self._score["cv"].append(cv)
-        self._score["aicc"].append(aicc)
 
     def _initialize_scores(self):
         """ Initializes scores for new fitting. """
